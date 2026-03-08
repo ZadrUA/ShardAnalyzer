@@ -83,12 +83,18 @@ class ShardAnalyzer(QMainWindow):
         layout.addWidget(self.grid_widget)
 
     def toggle_always_on_top(self, state):
-        self.apply_topmost(state == 2)
+            # state == 2 означает Qt.CheckState.Checked
+            self.apply_topmost(state == 2)
 
     def apply_topmost(self, is_top):
-        hwnd = int(self.winId())
-        h_pos = -1 if is_top else -2
-        ctypes.windll.user32.SetWindowPos(hwnd, h_pos, 0, 0, 0, 0, 0x0001 | 0x0002)
+        flags = self.windowFlags()
+            
+        self.setWindowFlags(flags & ~Qt.WindowType.WindowStaysOnTopHint)
+            
+        if is_top:
+            self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+            
+        self.show()
 
     def build_accurate_grid(self):
         elements = [
