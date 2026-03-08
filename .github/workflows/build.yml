@@ -1,0 +1,39 @@
+name: Build EXE
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write  # Обязательно для создания релизов
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller PyQt6
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --noconsole --onefile --name "ShardAnalyzer" ShardAnalyzer/ShardAnalyzer.py
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/ShardAnalyzer.exe
+          tag_name: v1.0.${{ github.run_number }}
+          name: Release v1.0.${{ github.run_number }}
+          body: "Automated build of ShardAnalyzer."
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
