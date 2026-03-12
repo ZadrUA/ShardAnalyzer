@@ -1,17 +1,50 @@
 import sys
 import re
 import os
-import ctypes
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QFileDialog, 
                              QComboBox, QGridLayout, QLabel, QFrame, QCheckBox)
 from PyQt6.QtCore import Qt, QTimer
 
+class OverlayGrid(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # Делаем виджет прозрачным для отрисовки, но активным для кликов
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+        self.layout = QGridLayout(self)
+        self.layout.setSpacing(1)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.cells = []
+        
+        for r in range(13):
+            for c in range(13):
+                cell = QLabel()
+                # Убираем фиксированный размер здесь, чтобы сетка была гибкой
+                cell.setStyleSheet("background-color: transparent; border: 1px solid transparent;")
+                cell.setProperty("active", False)
+                cell.mousePressEvent = lambda e, obj=cell: self.toggle_cell(obj)
+                self.layout.addWidget(cell, r, c)
+                self.cells.append(cell)
+        
+        self.hide()
+
+    def toggle_cell(self, cell):
+        if not cell.property("active"):
+            cell.setStyleSheet("background-color: rgba(0, 255, 0, 80); border: 1px solid rgba(0, 255, 0, 150);")
+            cell.setProperty("active", True)
+        else:
+            cell.setStyleSheet("background-color: transparent; border: 1px solid transparent;")
+            cell.setProperty("active", False)
+
+    def clear_all(self):
+        for cell in self.cells:
+            cell.setStyleSheet("background-color: transparent; border: 1px solid transparent;")
+            cell.setProperty("active", False)
+
 class ShardAnalyzer(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Shard analyzer")
-        
         self.log_path = ""
         self.analyses = []
         self.cell_widgets = {}
@@ -60,7 +93,15 @@ class ShardAnalyzer(QMainWindow):
         
         self.chk_top = QCheckBox("Always on top")
         self.chk_top.setChecked(True)
-        self.chk_top.stateChanged.connect(self.toggle_always_on_top)
+        self.chk_top.stateChanged.connect(lambda s: self.apply_topmost(s == 2))
+
+        # Чекбокс и Кнопка Очистки
+        self.chk_overlay = QCheckBox("Show Overlay")
+        self.chk_overlay.stateChanged.connect(self.toggle_overlay)
+        
+        self.btn_clear_overlay = QPushButton("Clear")
+        self.btn_clear_overlay.setFixedWidth(60)
+        self.btn_clear_overlay.clicked.connect(lambda: self.overlay.clear_all())
         
         header.addWidget(self.btn_open)
         header.addSpacing(10)
@@ -68,6 +109,8 @@ class ShardAnalyzer(QMainWindow):
         header.addWidget(self.btn_next)
         header.addWidget(self.history_combo)
         header.addWidget(self.chk_top)
+        header.addWidget(self.chk_overlay)
+        header.addWidget(self.btn_clear_overlay)
         header.addStretch(1)
         
         layout.addLayout(header)
@@ -76,27 +119,46 @@ class ShardAnalyzer(QMainWindow):
         self.status_lbl.setStyleSheet("color: #666; font-size: 10px; margin-left: 5px;")
         layout.addWidget(self.status_lbl)
 
-        self.grid_widget = QWidget()
-        self.grid_layout = QGridLayout(self.grid_widget)
+        # Контейнер для сеток
+        self.grid_container = QWidget()
+        self.grid_layout = QGridLayout(self.grid_container)
         self.grid_layout.setSpacing(1)
+        self.grid_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.build_accurate_grid()
-        layout.addWidget(self.grid_widget)
+        
+        # Создаем оверлей как дочерний элемент grid_container
+        self.overlay = OverlayGrid(self.grid_container)
+        
+        layout.addWidget(self.grid_container)
 
-    def toggle_always_on_top(self, state):
-            # state == 2 означает Qt.CheckState.Checked
-            self.apply_topmost(state == 2)
+    def toggle_overlay(self, state):
+        if state == 2:
+            self.overlay.show()
+            self.overlay.raise_()
+            self.update_overlay_geometry() # Обновляем позицию при показе
+        else:
+            self.overlay.hide()
+
+    def update_overlay_geometry(self):
+        # Принудительно растягиваем оверлей на весь grid_container
+        self.overlay.setGeometry(0, 0, self.grid_container.width(), self.grid_container.height())
+
+    def resizeEvent(self, event):
+        # Каждый раз при изменении размера окна подгоняем оверлей
+        super().resizeEvent(event)
+        self.update_overlay_geometry()
 
     def apply_topmost(self, is_top):
         flags = self.windowFlags()
-            
-        self.setWindowFlags(flags & ~Qt.WindowType.WindowStaysOnTopHint)
-            
         if is_top:
-            self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
-            
+            self.setWindowFlags(flags | Qt.WindowType.WindowStaysOnTopHint)
+        else:
+            self.setWindowFlags(flags & ~Qt.WindowType.WindowStaysOnTopHint)
         self.show()
 
     def build_accurate_grid(self):
+        # Ваша структура сетки
         elements = [
             (0, 0, 1, 1, "i-nw"), (0, 1, 1, 5, "i-won"), (0, 6, 1, 1, "i-n"), (0, 7, 1, 5, "i-eon"), (0, 12, 1, 1, "i-ne"),
             (1, 0, 5, 1, "i-now"), (1, 12, 5, 1, "i-noe"), (1, 1, 1, 1, "v-nw"), (1, 2, 1, 4, "v-won"), (1, 6, 1, 1, "v-n"), (1, 7, 1, 4, "v-eon"), (1, 11, 1, 1, "v-ne"),
@@ -161,7 +223,8 @@ class ShardAnalyzer(QMainWindow):
         self.history_combo.blockSignals(True)
         self.history_combo.clear()
         for i, data in enumerate(self.analyses):
-            time = re.search(r"\[(\d{2}:\d{2}:\d{2})\]", data).group(1)
+            match = re.search(r"\[(\d{2}:\d{2}:\d{2})\]", data)
+            time = match.group(1) if match else "??:??:??"
             self.history_combo.addItem(f"Analysis at {time}", i)
         if self.analyses: self.history_combo.setCurrentIndex(len(self.analyses) - 1)
         self.history_combo.blockSignals(False)
